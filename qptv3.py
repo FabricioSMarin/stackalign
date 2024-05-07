@@ -66,8 +66,6 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         # self.setStyleSheet("background-color: black;")
-        self.imgs_left = None
-        self.imgs_right = None
 
         self.setWindowTitle("Drag and Drop Files")
         self.setGeometry(100, 100, 400, 500)
@@ -98,10 +96,9 @@ class MainWindow(QMainWindow):
         self.frame.setLayout(self.layout)
         self.setCentralWidget(self.frame)
 
-
     def apply_transform(self): 
         #TODO: if transforms valid and nothing else missing, reveal next windwo
-        [self.combined.itemAt(i).widget().setVisible(True) for i in range(self.combined.count())]
+        self.combined.setVisible(True)
 
 class customWidget(QWidget):
     def __init__(self):
@@ -120,7 +117,7 @@ class customWidget(QWidget):
         self.clr = QPushButton("clear file list")
         self.clr.clicked.connect(self.clear_list)
         self.files = DragAndDropListWidget()
-        self.files.setObjectName("left")
+        self.files.setObjectName("files")
         self.files.filesAddedSig.connect(self.load_files)
         self.layout = QVBoxLayout()
         self.layout.addWidget(self.stack)
@@ -130,10 +127,15 @@ class customWidget(QWidget):
         self.setLayout(self.layout)
 
     def slider_changed(self):
-        self.stack.image_view.setImage(self.imgs_right[self.sld.value()])
+        self.stack.image_view.setImage(self.imgs[self.sld.value()])
 
     def clear_list(self):
-        self.files_left.clear()
+        self.files.clear()
+        self.stack.image_view.clear()
+        self.stack.scatter.clear()
+        self.elements.clear()
+        self.elements.addItem("Channel1")
+        
 
     def load_files(self):
         #get files list from sender. 
@@ -152,17 +154,11 @@ class customWidget(QWidget):
             for i in range(len(files)):
                 canvas[i] = imageio.v3.imread(files[i])
 
-        if listwidget.objectName() == "right":
-            self.imgs_right = canvas
-            self.sld_right.setRange(0,canvas.shape[0]-1)
-            self.stack_right.image_view.setImage(canvas[0])
-            self.stack_right.reset_view()
+        self.imgs = canvas
+        self.sld.setRange(0,canvas.shape[0]-1)
+        self.stack.image_view.setImage(canvas[0])
+        self.stack.reset_view()
 
-        else: 
-            self.imgs_left = canvas
-            self.sld_left.setRange(0,canvas.shape[0]-1)
-            self.stack_left.image_view.setImage(canvas[0])
-                
 class ImageView(pg.GraphicsLayoutWidget):
     mouseMoveSig = pyqtSignal(int,int, name= 'mouseMoveSig')
     mousePressSig =pyqtSignal(int,int,int, name= 'mousePressSig')
