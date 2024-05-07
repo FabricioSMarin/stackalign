@@ -11,6 +11,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 import math
 import imageio
+from scipy import interpolate, ndimage
+from skimage.transform import resize
+
 
 #Need to fix the spot positioning after DRAGGING image
 #TODO: add element dropdown
@@ -135,7 +138,26 @@ class customWidget(QWidget):
         self.stack.scatter.clear()
         self.elements.clear()
         self.elements.addItem("Channel1")
-        
+
+    def rotate_volume(self, recon, angles):
+        # angles = [x_deg,y_deg,z_deg]
+        if angles[0] != 0:
+            axes = (0, 1)  # z,y
+            recon = ndimage.rotate(recon, angles[0], axes=axes)
+
+        if angles[1] != 0:
+            axes = (1, 2)  # y,x
+            recon = ndimage.rotate(recon, angles[1], axes=axes)
+
+        if angles[2] != 0:
+            axes = (0, 2)  # x,z
+            recon = ndimage.rotate(recon, angles[2], axes=axes)
+
+        return recon
+    
+    def resize_volume(vol, x,y,z):
+        resized_array = resize(vol, (x,y,z), mode='constant', anti_aliasing=True)
+        return resized_array
 
     def load_files(self):
         #get files list from sender. 
