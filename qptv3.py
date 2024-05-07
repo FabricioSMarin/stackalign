@@ -1,6 +1,6 @@
 import sys
 import PyQt5
-from PyQt5.QtWidgets import QPushButton, QListWidget, QGraphicsView, QGraphicsScene, QLabel, QSlider, QVBoxLayout, QHBoxLayout, QFrame, QApplication, QWidget, QMainWindow, QListWidgetItem
+from PyQt5.QtWidgets import QPushButton, QListWidget, QComboBox, QGraphicsView, QGraphicsScene, QLabel, QSlider, QVBoxLayout, QHBoxLayout, QFrame, QApplication, QWidget, QMainWindow, QListWidgetItem
 from PyQt5.QtCore import pyqtSignal
 from PyQt5 import Qt
 from PyQt5.QtCore import *
@@ -12,6 +12,7 @@ import numpy as np
 import math
 import imageio
 
+#Need to fix the spot positioning after DRAGGING image
 #TODO: add element dropdown
 #TODO: add button to apply correction
 #TODO: add 
@@ -69,36 +70,10 @@ class MainWindow(QMainWindow):
         self.imgs_right = None
 
         self.setWindowTitle("Drag and Drop Files")
-        self.setGeometry(100, 100, 400, 800)
-        self.stack_left = ImageView()
-        self.sld_left = QSlider(Qt.Horizontal, self)
-        self.sld_left.setObjectName("sld_left")
-        self.sld_left.sliderReleased.connect(self.slider_changed)
-        self.clear_left = QPushButton("clear left file list")
-        self.clear_left.clicked.connect(self.clear_list)
-        self.files_left = DragAndDropListWidget()
-        self.files_left.setObjectName("left")
-        self.files_left.filesAddedSig.connect(self.load_files)
-        self.left = QVBoxLayout()
-        self.left.addWidget(self.stack_left)
-        self.left.addWidget(self.sld_left)
-        self.left.addWidget(self.clear_left)
-        self.left.addWidget(self.files_left)
+        self.setGeometry(100, 100, 400, 500)
 
-        self.stack_right = ImageView()
-        self.sld_right = QSlider(Qt.Horizontal, self)
-        self.sld_right.setObjectName("sld_right")
-        self.sld_right.sliderReleased.connect(self.slider_changed)
-        self.clear_right = QPushButton("clear right file list")
-        self.clear_right.clicked.connect(self.clear_list)
-        self.files_right = DragAndDropListWidget()
-        self.files_right.setObjectName("right")
-        self.files_right.filesAddedSig.connect(self.load_files)
-        self.right = QVBoxLayout()
-        self.right.addWidget(self.stack_right)
-        self.right.addWidget(self.sld_right)
-        self.right.addWidget(self.clear_right)
-        self.right.addWidget(self.files_right)
+        self.stack_left = customWidget()
+        self.stack_right = customWidget()
 
         # Create a rotated button
         self.apply = QPushButton("^^ Apply transformation ^^")
@@ -110,41 +85,55 @@ class MainWindow(QMainWindow):
         gw = QGraphicsView()
         gw.setScene(scene)
 
-        self.stack_combined = ImageView()
-        self.sld_combined = QSlider(Qt.Horizontal, self)
-        self.sld_combined.setObjectName("sld_combined")
-        self.sld_combined.sliderReleased.connect(self.slider_changed)
-        self.combined = QVBoxLayout()
-        self.combined.addWidget(self.stack_combined)
-        self.combined.addWidget(self.sld_combined)
-
-        [self.combined.itemAt(i).widget().setVisible(False) for i in range(self.combined.count())]
+        self.combined = customWidget()
+        self.combined.setVisible(False)
 
         self.layout = QHBoxLayout()
-        self.layout.addLayout(self.left)
-        self.layout.addLayout(self.right)
+        self.layout.addWidget(self.stack_left)
+        self.layout.addWidget(self.stack_right)
         self.layout.addWidget(gw)
-        self.layout.addLayout(self.combined)
+        self.layout.addWidget(self.combined)
 
         self.frame = QFrame()
         self.frame.setLayout(self.layout)
         self.setCentralWidget(self.frame)
 
+
+    def apply_transform(self): 
+        #TODO: if transforms valid and nothing else missing, reveal next windwo
+        [self.combined.itemAt(i).widget().setVisible(True) for i in range(self.combined.count())]
+
+class customWidget(QWidget):
+    def __init__(self):
+        super(customWidget, self).__init__()
+        self.setMinimumSize(300,300)
+        self.stack = ImageView()
+        self.elements = QComboBox()
+        self.elements.addItems(["Channel1"])
+        self.elements.setMaximumWidth(60)
+        self.sld = QSlider(Qt.Horizontal, self)
+        self.sld.setObjectName("sld")
+        self.sld.sliderReleased.connect(self.slider_changed)
+        self.el_sl = QHBoxLayout()
+        self.el_sl.addWidget(self.elements)
+        self.el_sl.addWidget(self.sld)
+        self.clr = QPushButton("clear file list")
+        self.clr.clicked.connect(self.clear_list)
+        self.files = DragAndDropListWidget()
+        self.files.setObjectName("left")
+        self.files.filesAddedSig.connect(self.load_files)
+        self.layout = QVBoxLayout()
+        self.layout.addWidget(self.stack)
+        self.layout.addLayout(self.el_sl)
+        self.layout.addWidget(self.clr)
+        self.layout.addWidget(self.files)
+        self.setLayout(self.layout)
+
     def slider_changed(self):
-        try: 
-            sld = self.sender()
-            if sld.objectName() == "sld_right":
-                self.stack_right.image_view.setImage(self.imgs_right[sld.value()])
-            else: 
-                self.stack_left.image_view.setImage(self.imgs_left[sld.value()])
-        except Exception as e:
-            print(e)
+        self.stack.image_view.setImage(self.imgs_right[self.sld.value()])
 
     def clear_list(self):
-        if "left" in self.sender().text():
-            self.files_left.clear()
-        else: 
-            self.files_right.clear()
+        self.files_left.clear()
 
     def load_files(self):
         #get files list from sender. 
@@ -173,18 +162,13 @@ class MainWindow(QMainWindow):
             self.imgs_left = canvas
             self.sld_left.setRange(0,canvas.shape[0]-1)
             self.stack_left.image_view.setImage(canvas[0])
-
-    def apply_transform(self): 
-        #TODO: if transforms valid and nothing else missing, reveal next windwo
-        [self.combined.itemAt(i).widget().setVisible(True) for i in range(self.combined.count())]
-
                 
 class ImageView(pg.GraphicsLayoutWidget):
     mouseMoveSig = pyqtSignal(int,int, name= 'mouseMoveSig')
     mousePressSig =pyqtSignal(int,int,int, name= 'mousePressSig')
     def __init__(self):
         super(ImageView, self).__init__()
-        self.setMinimumSize(300,600)
+        self.setMinimumSize(300,300)
         self.initUI()
 
     def initUI(self):
@@ -202,26 +186,7 @@ class ImageView(pg.GraphicsLayoutWidget):
         self.roi = pg.CircleROI(pos=(20,20), size=40, pen=(255, 0, 0), handlePen=(0,255,0))
         self.roi.handleSize=1
         self.roi.sigRegionChanged.connect(self.updateRoi)
-        self.vertical_line = pg.InfiniteLine(angle=90)
-        self.vertical_line.setPen(pg.mkColor(255,0,255))
-        self.vertical_line.setPos((20,20))
-
-        self.horizontal_line = pg.InfiniteLine(angle=0, movable=False)
-        self.horizontal_line.setPen(pg.mkColor(255,0,255))
-        self.horizontal_line.addMarker(marker=">|<")
-        self.horizontal_line.setPos((20,20))
-
-        self.v1 = self.addViewBox()
-        self.v1.addItem(self.zoom_view)
-        self.v1.addItem(self.vertical_line)
-        self.v1.addItem(self.horizontal_line)
-        self.v1.invertY(True)
-        self.v1.setAspectLocked(True)
-        self.v1.setMenuEnabled(False)
-        self.v1.setMouseEnabled(x=False, y=False)
-        self.v1.setBorder(None)
         border_pen = pg.mkPen(color=(255, 255, 255), width=2)
-        self.v1.setBorder(border_pen)
 
         self.v2 = self.addViewBox(1,0)
         self.v2.addItem(self.image_view)
@@ -237,13 +202,7 @@ class ImageView(pg.GraphicsLayoutWidget):
         self.v2.disableAutoRange()
         self.v2.setBorder(None)
         self.v2.setBorder(border_pen)
-
-
-        # pos = np.random.normal(size=(2, 10), scale=100)
-        # spots = [{'pos': pos[:, i], 'brush': pg.intColor(i * 10, 100)} for i in range(10)] + [{'pos': [0, 0], 'data': 1}]
-        # self.scatter.addPoints(spots)
  
-        # add item to plot window
         self.roi.removeHandle(0)
 
     def setZoomLimits(self, yrange, xrange):
@@ -251,8 +210,6 @@ class ImageView(pg.GraphicsLayoutWidget):
         self.v2.setYRange(0, yrange, padding=0)
         x = int(np.floor(xrange*0.025))
         y = int(np.floor(yrange*0.025))
-        self.v1.setXRange(0, x, padding=0)
-        self.v1.setYRange(0, y, padding=0)
 
     def updateRoi(self, roi):
         try:
@@ -280,22 +237,17 @@ class ImageView(pg.GraphicsLayoutWidget):
         self.image_view.setPos(0,0)
 
     def zoom(self, factor):
-        # self.image_view.scaleBy((factor, factor), center=(self.moving_pos.x(), self.moving_pos.y()))
         try:
             self.v2.scaleBy((factor, factor), center=(self.moving_pos.x(), self.moving_pos.y()))
         except: 
             self.v2.scaleBy((factor, factor), center=(0, 0))
 
-        # self.v2.setScale(factor)
-
     def wheelEvent(self,ev):
         print(ev.angleDelta().y())
         if ev.angleDelta().y()<0:
-            # self.zoom_sf-=0.02
             self.zoom_sf=1.03
             self.zoom(self.zoom_sf)
         elif ev.angleDelta().y()>0:
-            # self.zoom_sf+=0.02
             self.zoom_sf=0.97
             self.zoom(self.zoom_sf)
         self.moving_pos = self.v2.mapSceneToView(ev.pos())
@@ -316,7 +268,6 @@ class ImageView(pg.GraphicsLayoutWidget):
                 return
             self.image_view.setPos(diff.x() + self.img_pos.x(), diff.y() + self.img_pos.y())
             self.scatter.moveBy(inc.x(), inc.y())
-            # self.scatter.mapRectToView(self.image_view.viewRect())
 
         self.last_moving_pos = self.moving_pos
 
@@ -324,9 +275,6 @@ class ImageView(pg.GraphicsLayoutWidget):
         self.start_pos = self.v2.mapSceneToView(ev.pos())
         self.img_pos = self.image_view.pos()
         p = self.v2.viewRange()
-
-        # frame_height = self.image_view.height()
-        # frame_width = self.image_view.width()
 
         if ev.button() == 1:
             pos = (self.start_pos.x()+20, self.start_pos.y()+20)
