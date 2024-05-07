@@ -139,6 +139,12 @@ class customWidget(QWidget):
         self.elements.clear()
         self.elements.addItem("Channel1")
 
+    def calculate_distortion(pointsA, pointsB):
+        #TODO:  translation
+        #Angular transform
+        #scale transform
+        pass
+    
     def rotate_volume(self, recon, angles):
         # angles = [x_deg,y_deg,z_deg]
         if angles[0] != 0:
