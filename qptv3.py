@@ -186,6 +186,19 @@ class customWidget(QWidget):
         self.sld.setRange(0,canvas.shape[0]-1)
         self.stack.image_view.setImage(canvas[0])
         self.stack.reset_view()
+        # self.adjust_widget()
+
+    # def adjust_widget(self):
+    #     h = self.stack.image_view.height()
+    #     w = self.stack.image_view.width()
+
+    #     ow = self.stack.width()
+    #     oh = self.stack.height()
+
+    #     nw = int(ow*(w/h))  # #200 # stretches horizontally
+    #     # nh = int(oh*(h/nw)) # 50 # squished         
+    #     self.stack.setFixedSize(oh,nw)
+
 
 class ImageView(pg.GraphicsLayoutWidget):
     mouseMoveSig = pyqtSignal(int,int, name= 'mouseMoveSig')
