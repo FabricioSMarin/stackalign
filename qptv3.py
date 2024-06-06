@@ -119,8 +119,9 @@ class MainWindow(QMainWindow):
                 return
             else: 
                 # #temporary: downscale larger volume (speed)
-                downscaled = self.downscale_larger(np.array(self.stack_left.markers), self.stack_left.imgs, np.array(self.stack_right.markers), self.stack_right.imgs)
-                
+                # downscaled = self.downscale_larger(np.array(self.stack_left.markers), self.stack_left.imgs, np.array(self.stack_right.markers), self.stack_right.imgs)
+                new_shape = tuple(np.round(np.array(self.stack_right.imgs.shape)*0.08).astype(int))
+                downscaled = resize(self.stack_right.imgs, new_shape, mode='constant', anti_aliasing=True)
                 
                                 # get normal vectors 
                 v1, v2 = self.get_vectors_from_planes(np.array(self.stack_left.markers), np.array(self.stack_right.markers))
@@ -128,8 +129,8 @@ class MainWindow(QMainWindow):
                 R = self.align_vectors(v1,v2)
                 #apply rotation matrix
                 corrected_vol = self.apply_R2img(downscaled, R)
-                
-                self.combined.imgs_dict["combined"] = downscaled
+                self.combined.imgs = corrected_vol
+                self.combined.imgs_dict["combined"] = corrected_vol
                 self.combined.imgs_dict["2ide"]= self.stack_left.imgs 
                 self.combined.elements.currentIndexChanged.disconnect()
                 self.combined.elements.clear()
@@ -142,8 +143,9 @@ class MainWindow(QMainWindow):
                 self.combined.sld.setValue(0)
                 # self.combined.sld.valueChanged.connect(self.combined.slider_changed)
                 self.combined.stack.reset_view()
-            
-
+                #db =  np.sqrt((1194.7-1589.6)**2 + (129-617)**2) = 
+                # ds = np.sqrt((93.25460122699387-146.34509202453987)**2 + (157.19401840490798-171.04371165644173)**2) = 54
+                scale = 54.7/627.7
 
 
 
@@ -184,7 +186,7 @@ class MainWindow(QMainWindow):
 
     # def calculate_angles2(self,u,v):
 
-    def apply_R2img(vol, R):
+    def apply_R2img(self, vol, R):
         depth,height,width = vol.shape
         coords = np.indices((depth,height,width)).reshape(3,-1)
         coords_centered = coords - np.array([[depth//2],[height//2],[width//2]])
@@ -220,7 +222,32 @@ class MainWindow(QMainWindow):
                       [2*(bd+ac), 2*(cd-ab),aa+dd-bb-cc]])
         return R
 
-
+    def rebin_3d_array(self, arr, scale_factor):
+        # Calculate the new shape after rebinning
+        new_shape = tuple(int(old_dim * factor) for old_dim, factor in zip(arr.shape, scale_factor))
+        
+        # Create an array to hold the rebinned data
+        rebinned_arr = np.zeros(new_shape)
+        
+        # Calculate the size of each bin in the rebinned array
+        bin_size = tuple(int(old_dim / new_dim) for old_dim, new_dim in zip(arr.shape, new_shape))
+        
+        # Iterate over each element in the rebinned array
+        for i in range(new_shape[0]):
+            for j in range(new_shape[1]):
+                for k in range(new_shape[2]):
+                    # Calculate the range of indices in the original array corresponding to this bin
+                    start_i = int(i * bin_size[0])
+                    end_i = int((i + 1) * bin_size[0])
+                    start_j = int(j * bin_size[1])
+                    end_j = int((j + 1) * bin_size[1])
+                    start_k = int(k * bin_size[2])
+                    end_k = int((k + 1) * bin_size[2])
+                    
+                    # Take the average of the elements in this bin
+                    rebinned_arr[i, j, k] = np.mean(arr[start_i:end_i, start_j:end_j, start_k:end_k])
+        
+        return rebinned_arr
 
     
     def rotate_volume(self, volume, angles):
@@ -380,18 +407,49 @@ class customWidget(QWidget):
             canvas = imageio.v3.imread(files[0])
         else: 
             shp = (len(files),*img.shape)
-            canvas = np.zeros(shp)
+            canvas = np.empty(shp)
             for i in range(len(files)):
                 canvas[i] = imageio.v3.imread(files[i])
+            
+        if canvas.shape[1]>500:
+            ##temp resize 
+            downscaled = self.rescale_3d_array(canvas,0.08)
+            self.imgs = downscaled
+        else: 
+            self.imgs = canvas
 
-        self.imgs = canvas
-        self.sld.setRange(0,canvas.shape[0]-1)
-        self.stack.image_view.setImage(canvas[0])
+        self.sld.setRange(0,self.imgs.shape[0]-1)
+        self.stack.image_view.setImage(self.imgs[0])
         self.stack.original_pos = self.stack.image_view.pos()
         print(self.stack.original_pos)
-
-
         self.stack.reset_view()
+
+    def rebin_3d_array(self, arr, scale_factor):
+        # Determine the new shape after rebinning
+        new_shape = tuple(np.array(arr.shape) // scale_factor)
+        
+        # Reshape the array into a shape compatible with rebinning
+        reshaped_arr = arr[:new_shape[0]*scale_factor[0], :new_shape[1]*scale_factor[1], :new_shape[2]*scale_factor[2]]
+        reshaped_arr = reshaped_arr.reshape((new_shape[0], scale_factor[0], new_shape[1], scale_factor[1], new_shape[2], scale_factor[2]))
+        
+        # Sum elements within each bin
+        rebinned_arr = reshaped_arr.sum(axis=(1, 3, 5))
+        
+        return rebinned_arr
+
+def rebin_3d_array(arr, scale_factor):
+    # Determine the new shape after rebinning
+    new_shape = tuple(np.array(arr.shape) // scale_factor)
+    
+    # Reshape the array into a shape compatible with rebinning
+    reshaped_arr = arr[:new_shape[0]*scale_factor[0], :new_shape[1]*scale_factor[1], :new_shape[2]*scale_factor[2]]
+    reshaped_arr = reshaped_arr.reshape((new_shape[0], scale_factor[0], new_shape[1], scale_factor[1], new_shape[2], scale_factor[2]))
+    
+    # Sum elements within each bin
+    rebinned_arr = reshaped_arr.sum(axis=(1, 3, 5))
+    
+    return rebinned_arr
+
 
 class ImageView(pg.GraphicsLayoutWidget):
     mouseMoveSig = pyqtSignal(int,int, name= 'mouseMoveSig')
