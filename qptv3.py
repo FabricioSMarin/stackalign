@@ -437,19 +437,6 @@ class customWidget(QWidget):
         
         return rebinned_arr
 
-def rebin_3d_array(arr, scale_factor):
-    # Determine the new shape after rebinning
-    new_shape = tuple(np.array(arr.shape) // scale_factor)
-    
-    # Reshape the array into a shape compatible with rebinning
-    reshaped_arr = arr[:new_shape[0]*scale_factor[0], :new_shape[1]*scale_factor[1], :new_shape[2]*scale_factor[2]]
-    reshaped_arr = reshaped_arr.reshape((new_shape[0], scale_factor[0], new_shape[1], scale_factor[1], new_shape[2], scale_factor[2]))
-    
-    # Sum elements within each bin
-    rebinned_arr = reshaped_arr.sum(axis=(1, 3, 5))
-    
-    return rebinned_arr
-
 
 class ImageView(pg.GraphicsLayoutWidget):
     mouseMoveSig = pyqtSignal(int,int, name= 'mouseMoveSig')
