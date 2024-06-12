@@ -14,6 +14,11 @@ import imageio
 from scipy import interpolate, ndimage
 from skimage.transform import resize
 from scipy.ndimage import zoom, map_coordinates
+from scipy.ndimage import affine_transform
+import time 
+from scipy.ndimage import shift
+
+
 
 
 
@@ -82,7 +87,7 @@ class MainWindow(QMainWindow):
 
         # Create a rotated button
         self.apply = QPushButton("^^ Apply transformation ^^")
-        self.apply.clicked.connect(self.apply_transform)
+        self.apply.clicked.connect(self.align_volumes)
         self.apply.setFixedHeight(30)
         self.apply.setCheckable(True)
         scene = QGraphicsScene()
@@ -110,25 +115,45 @@ class MainWindow(QMainWindow):
         self.frame.setLayout(self.layout)
         self.setCentralWidget(self.frame)
 
-    def apply_transform(self): 
+    def align_volumes(self): 
         if self.sender().isChecked():
             self.combined.setVisible(True)
-
-        
             if any(elem is None for elem in self.stack_left.markers) or any(elem is None for elem in self.stack_right.markers):
                 return
             else: 
-                # #temporary: downscale larger volume (speed)
-                # downscaled = self.downscale_larger(np.array(self.stack_left.markers), self.stack_left.imgs, np.array(self.stack_right.markers), self.stack_right.imgs)
-                new_shape = tuple(np.round(np.array(self.stack_right.imgs.shape)*0.08).astype(int))
+                #[-z,-y,x] -> [x,y,z]
+                ptsA = np.array(self.stack_left.markers)
+                # ptsA[:,[0,1,2]] = ptsA[:,[1,2,0]]
+                # ptsA[:,1]*=-1
+                # ptsA[:,2]*=-1
+
+                ptsB = np.array(self.stack_right.markers)
+                # ptsB[:,[0,1,2]] = ptsB[:,[1,2,0]]
+                # ptsB[:,1]*=-1
+                # ptsB[:,2]*=-1
+
+                transformed_triangle1, rotation_matrix, translation_vector, scale_factor = self.align_triangles(ptsB, ptsA)
+
+                #apply scale factor 
+                new_shape = tuple(np.round(np.array(self.stack_right.imgs.shape)*scale_factor).astype(int))
                 downscaled = resize(self.stack_right.imgs, new_shape, mode='constant', anti_aliasing=True)
-                
-                                # get normal vectors 
-                v1, v2 = self.get_vectors_from_planes(np.array(self.stack_left.markers), np.array(self.stack_right.markers))
-                #get rotation matrix
-                R = self.align_vectors(v1,v2)
+                # downscaled = self.stack_right.imgs
+
+                #shift images to centroid
+                translated_image_stack = shift(downscaled, shift=translation_vector, mode='nearest')
+
+
+
+
                 #apply rotation matrix
-                corrected_vol = self.apply_R2img(downscaled, R)
+                tic = time.time()
+                corrected_vol = self.apply_R2img(translated_image_stack, rotation_matrix)
+                print("method 1 took: ", time.time()-tic, " seconds")
+                
+                # tic = time.time()
+                # corrected_vol = self.apply_rotation(downscaled, rotation_matrix)
+                # print("method 2 took: ", time.time()-tic, " seconds")
+                
                 self.combined.imgs = corrected_vol
                 self.combined.imgs_dict["combined"] = corrected_vol
                 self.combined.imgs_dict["2ide"]= self.stack_left.imgs 
@@ -145,46 +170,97 @@ class MainWindow(QMainWindow):
                 self.combined.stack.reset_view()
                 #db =  np.sqrt((1194.7-1589.6)**2 + (129-617)**2) = 
                 # ds = np.sqrt((93.25460122699387-146.34509202453987)**2 + (157.19401840490798-171.04371165644173)**2) = 54
-                scale = 54.7/627.7
-
-
+                # scale = 54.7/627.7
 
         else: 
             self.combined.setVisible(False)
 
-    def get_vectors_from_planes(self, ptsA, ptsB):
-        # u = np.array([u1,u2,u3])
-        # v = np.array([v1,v2,v3])
+    def align_triangles(self, triangle1, triangle2):
+        """
+        Aligns triangle1 to triangle2.
+        
+        Parameters:
+        triangle1 (numpy.ndarray): An array of shape (3, 3) representing the vertices of the first triangle.
+        triangle2 (numpy.ndarray): An array of shape (3, 3) representing the vertices of the second triangle.
+        
+        Returns:
+        numpy.ndarray: Transformed vertices of triangle1.
+        numpy.ndarray: The rotation matrix.
+        numpy.ndarray: The translation vector.
+        float: The scaling factor.
+        """
+        # Step 1: Translate both triangles to origin
+        translated_triangle1, centroid1 = self.translate_to_origin(triangle1)
+        translated_triangle2, centroid2 = self.translate_to_origin(triangle2)
+        
+        # Step 2: Scale triangle1 to match the size of triangle2
+        scaled_triangle1, scale_factor = self.scale_to_match(translated_triangle1, translated_triangle2)
+        
+        # Step 3: Find the optimal rotation using the Kabsch algorithm
+        rotation_matrix = self.kabsch_algorithm(scaled_triangle1, translated_triangle2)
+        
+        # Apply the rotation to scaled_triangle1
+        rotated_triangle1 = np.dot(scaled_triangle1, rotation_matrix)
+        
+        # Translate rotated_triangle1 back to the position of triangle2
+        transformed_triangle1 = rotated_triangle1 + centroid2
+        
+        return transformed_triangle1, rotation_matrix, centroid2 - scale_factor * np.dot(centroid1, rotation_matrix), scale_factor
 
-        #find normal vector of plane, 
-        #find angle of normal vector with respect to each cartesian vector (1,0,0) (0,1,0), (0,0,1)
-        # to find the angle with respect to each plane. 
 
-        #normal vector of first plane
-        va1 = ptsA[1] - ptsA[0]
-        va2 = ptsA[2] - ptsA[0]
-        nv1 = np.cross(va1,va2)
-        v1 = nv1/ np.linalg.norm(nv1)
+    def translate_to_origin(self, points):
+        """
+        Translates a set of points so that their centroid is at the origin.
+        
+        Parameters:
+        points (numpy.ndarray): An array of shape (3, 3) representing the vertices of the triangle.
+        
+        Returns:
+        numpy.ndarray: Translated points with the centroid at the origin.
+        numpy.ndarray: The original centroid of the points.
+        """
+        centroid = np.mean(points, axis=0)
+        translated_points = points - centroid
+        return translated_points, centroid
 
-        #normal vector of second plane
-        vb1 = ptsB[1] - ptsB[0]
-        vb2 = ptsB[2] - ptsB[0]
-        nv2 = np.cross(vb1,vb2)
-        v2 = nv2/ np.linalg.norm(nv2)
+    def scale_to_match(self, points1, points2):
+        """
+        Scales points1 to match the scale of points2.
+        
+        Parameters:
+        points1 (numpy.ndarray): An array of shape (3, 3) representing the vertices of the first triangle.
+        points2 (numpy.ndarray): An array of shape (3, 3) representing the vertices of the second triangle.
+        
+        Returns:
+        numpy.ndarray: Scaled points1.
+        float: The scaling factor.
+        """
+        size1 = np.linalg.norm(points1[1] - points1[0])
+        size2 = np.linalg.norm(points2[1] - points2[0])
+        scale_factor = size2 / size1
+        scaled_points1 = points1 * scale_factor
+        return scaled_points1, scale_factor
 
-        # #dot product of noprmal vector 2 with respect to each component of normal vector 1
-        # dx = np.dot(nv2_normalized[0],nv1_normalized[0])
-        # dy = np.dot(nv2_normalized[1],nv1_normalized[1])
-        # dz = np.dot(nv2_normalized[2],nv1_normalized[2])
+    def kabsch_algorithm(self, P, Q):
+        """
+        Finds the optimal rotation matrix using the Kabsch algorithm.
+        
+        Parameters:
+        P (numpy.ndarray): An array of shape (3, 3) representing the vertices of the first triangle.
+        Q (numpy.ndarray): An array of shape (3, 3) representing the vertices of the second triangle.
+        
+        Returns:
+        numpy.ndarray: The rotation matrix.
+        """
+        C = np.dot(P.T, Q)
+        V, S, W = np.linalg.svd(C)
+        d = (np.linalg.det(V) * np.linalg.det(W)) < 0.0
 
-        # #angles between plane A and plane B with respect to each component from plane A
-        # ax = np.degrees(np.arccos(dx))
-        # ay = np.degrees(np.arccos(dy))
-        # az = np.degrees(np.arccos(dz))
-                    
-        return v1, v2
+        if d:
+            V[:, -1] = -V[:, -1]
 
-    # def calculate_angles2(self,u,v):
+        rotation_matrix = np.dot(V, W)
+        return rotation_matrix
 
     def apply_R2img(self, vol, R):
         depth,height,width = vol.shape
@@ -200,27 +276,94 @@ class MainWindow(QMainWindow):
                     coords = rotated_coords[:,z,y,x]
                     if np.all((coords>=0) & (coords< [depth,height,width])):
                         rotated_vol[z,y,x] = map_coordinates(vol, coords[:,None], order=1, mode = "nearest")
+        # rotated_vol = rotated_vol[:,:,::-1]
         return rotated_vol
 
+    def apply_rotation(self, image_stack, rotation_matrix):
+        # Calculate the center of the image stack
+        center = np.array(image_stack.shape) / 2
         
-    def align_vectors(self, v1,v2):
-        v1 = v1/np.linalg.norm(v1)
-        v2 = v2/np.linalg.norm(v2)
-        axis = np.cross(v1,v2)
-        theta = np.arccos(np.dot(v1,v2))
-        R = self.rot_mat(axis,theta)
-        return R
+        # Create an affine transformation matrix
+        transformation_matrix = np.eye(4)
+        transformation_matrix[:3, :3] = rotation_matrix
+        
+        # Apply the affine transformation to each slice in the stack
+        rotated_stack = np.zeros_like(image_stack)
+        for i in range(image_stack.shape[0]):
+            rotated_stack[i] = affine_transform(
+                image_stack[i],
+                transformation_matrix[:2, :2],
+                offset=0,
+                order=1,
+                mode='constant',
+                cval=0
+            )
+        # rotated_stack = rotated_stack[:,:,::-1]
+        return rotated_stack
+        
+    # def align_vectors(self, v1,v2, ax="x"):
+    #     v1 = v1/np.linalg.norm(v1)
+    #     v2 = v2/np.linalg.norm(v2)
+    #     if ax=="x":
+    #         v1 = np.delete(v1,0)
+    #         v2 = np.delete(v2,0)
+    #         theta_v1 = np.arccos(np.dot(v1,np.array([0,1])))
+    #         theta_v2 = np.arccos(np.dot(v2,np.array([0,1])))
+    #         theta = theta_v1-theta_v2
+    #     elif ax=="y":
+    #         v1 = np.delete(v1,1)
+    #         v2 = np.delete(v2,1)
+    #         theta_v1 = np.arccos(np.dot(v1,np.array([0,1])))
+    #         theta_v2 = np.arccos(np.dot(v2,np.array([0,1])))
+    #         theta = theta_v1-theta_v2
+    #     elif ax=="z":
+    #         v1 = np.delete(v1,2)
+    #         v2 = np.delete(v2,2)
+    #         theta_v1 = np.arccos(np.dot(v1,np.array([0,1])))
+    #         theta_v2 = np.arccos(np.dot(v2,np.array([0,1])))
+    #         theta = theta_v1-theta_v2
+    #     else: return 
 
-    def rot_mat(self, axis,theta):
-        axis =axis/np.linalg.norm(axis)
-        a = np.cos(theta/2)
-        b,c,d = -axis*np.sin(theta/2)
-        aa,bb,cc,dd = a*a,b*b,c*c,d*d
-        bc,ad,ac,ab,bd,cd = b*c,a*d,a*c,a*b,b*d,c*d
-        R = np.array([[aa+bb-cc-dd, 2*(bc+ad), 2*(bd-ac)],
-                      [2*(bc-ad), aa+cc-bb-dd, 2*(cd+ab)],
-                      [2*(bd+ac), 2*(cd-ab),aa+dd-bb-cc]])
-        return R
+    #     # R = self.rot_mat(axis,theta)
+    #     return np.degrees(theta)
+
+    # def rotation_matrix_from_angles(self, theta_x, theta_y, theta_z):
+    #     """
+    #     Creates a combined rotation matrix from rotations around the x, y, and z axes.
+        
+    #     Parameters:
+    #     theta_x (float): Rotation angle around the x-axis in radians.
+    #     theta_y (float): Rotation angle around the y-axis in radians.
+    #     theta_z (float): Rotation angle around the z-axis in radians.
+        
+    #     Returns:
+    #     numpy.ndarray: The combined rotation matrix.
+    #     """
+    #     # Rotation matrix for the x-axis
+    #     R_x = np.array([
+    #         [1, 0, 0],
+    #         [0, np.cos(theta_x), -np.sin(theta_x)],
+    #         [0, np.sin(theta_x), np.cos(theta_x)]
+    #     ])
+        
+    #     # Rotation matrix for the y-axis
+    #     R_y = np.array([
+    #         [np.cos(theta_y), 0, np.sin(theta_y)],
+    #         [0, 1, 0],
+    #         [-np.sin(theta_y), 0, np.cos(theta_y)]
+    #     ])
+        
+    #     # Rotation matrix for the z-axis
+    #     R_z = np.array([
+    #         [np.cos(theta_z), -np.sin(theta_z), 0],
+    #         [np.sin(theta_z), np.cos(theta_z), 0],
+    #         [0, 0, 1]
+    #     ])
+        
+    #     # Combined rotation matrix
+    #     R = np.dot(R_z, np.dot(R_y, R_x))
+        
+    #     return R
 
     def rebin_3d_array(self, arr, scale_factor):
         # Calculate the new shape after rebinning
@@ -250,20 +393,20 @@ class MainWindow(QMainWindow):
         return rebinned_arr
 
     
-    def rotate_volume(self, volume, angles):
-        # angles = [x_deg,y_deg,z_deg]
-        if angles[0] != 0:
-            axes = (0, 1)  # z,y
-            volume = ndimage.rotate(volume, angles[0], axes=axes)
+    # def rotate_volume(self, volume, angles):
+    #     # angles = [x_deg,y_deg,z_deg], axes = [z,y,x]
+    #     if angles[0] != 0: #rot_axis=x, plane = y,z
+    #         axes = (0, 1)  # z,y
+    #         volume = ndimage.rotate(volume, angles[0], axes=axes)
 
-        if angles[1] != 0:
-            axes = (1, 2)  # y,x
-            volume = ndimage.rotate(volume, angles[1], axes=axes)
+    #     if angles[1] != 0: #rot_axis=y, plane = z,x
+    #         axes = (0, 2)  # z, x
+    #         volume = ndimage.rotate(volume, angles[1], axes=axes)
 
-        if angles[2] != 0:
-            axes = (0, 2)  # x,z
-            volume = ndimage.rotate(volume, angles[2], axes=axes)
-        return volume
+    #     if angles[2] != 0: #rot_axis=z, plane = x,y
+    #         axes = (1, 2)  # x,z
+    #         volume = ndimage.rotate(volume, angles[2], axes=axes)
+    #     return volume
     
     def upscale_smaller(self, markers1, stack_1, markers2, stack_2):
         # resized_array = resize(vol, (x,y,z), mode='constant', anti_aliasing=True)
@@ -302,7 +445,6 @@ class MainWindow(QMainWindow):
 
     def shift_volume(self,volume, x,y,z):
         pass
-
 
 
         #TODO: if transforms valid and nothing else missing, reveal next windwo
@@ -411,12 +553,10 @@ class customWidget(QWidget):
             for i in range(len(files)):
                 canvas[i] = imageio.v3.imread(files[i])
             
-        if canvas.shape[1]>500:
-            ##temp resize 
-            downscaled = self.rescale_3d_array(canvas,0.08)
-            self.imgs = downscaled
-        else: 
-            self.imgs = canvas
+        ##temp resize 
+        new_shape = tuple(np.round(np.array(canvas.shape)*0.4).astype(int))
+        downscaled = resize(canvas, new_shape, mode='constant', anti_aliasing=True)
+        self.imgs = downscaled
 
         self.sld.setRange(0,self.imgs.shape[0]-1)
         self.stack.image_view.setImage(self.imgs[0])
