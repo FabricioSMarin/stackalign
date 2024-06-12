@@ -553,10 +553,10 @@ class customWidget(QWidget):
             for i in range(len(files)):
                 canvas[i] = imageio.v3.imread(files[i])
             
-        ##temp resize 
-        new_shape = tuple(np.round(np.array(canvas.shape)*0.4).astype(int))
-        downscaled = resize(canvas, new_shape, mode='constant', anti_aliasing=True)
-        self.imgs = downscaled
+        # ##temp resize 
+        # new_shape = tuple(np.round(np.array(canvas.shape)*0.4).astype(int))
+        # downscaled = resize(canvas, new_shape, mode='constant', anti_aliasing=True)
+        self.imgs = canvas
 
         self.sld.setRange(0,self.imgs.shape[0]-1)
         self.stack.image_view.setImage(self.imgs[0])
