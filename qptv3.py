@@ -142,9 +142,6 @@ class MainWindow(QMainWindow):
                 #shift images to centroid
                 translated_image_stack = shift(downscaled, shift=translation_vector, mode='nearest')
 
-
-
-
                 #apply rotation matrix
                 tic = time.time()
                 corrected_vol = self.apply_R2img(translated_image_stack, rotation_matrix)
@@ -563,6 +560,7 @@ class customWidget(QWidget):
         self.stack.original_pos = self.stack.image_view.pos()
         print(self.stack.original_pos)
         self.stack.reset_view()
+
 
     def rebin_3d_array(self, arr, scale_factor):
         # Determine the new shape after rebinning
